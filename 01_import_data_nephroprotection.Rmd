@@ -1,0 +1,123 @@
+---
+title: "import_data_nephroprotection"
+author: "Rebecca L. Knoll"
+date: "last edit `r format(Sys.time(), '%d %B %Y')`"
+output: 
+  html_document:
+    code_folding: show
+    number_sections: yes
+    smart: no
+    toc: yes
+    df_print: paged
+    toc_float: yes
+---
+
+```{r setup 2, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache= FALSE)
+```
+
+```{r path and packages, include=FALSE}
+renv::activate()
+
+setwd("/Users/rebecca/Documents/Forschung/SFB_B07_Nephroprotection")
+getwd() 
+
+# install and load all needed packages
+library(pacman)
+pacman::p_load(tidyverse, phyloseq, magrittr, janitor, microbiome, knitr, lubridate, naniar, stringr)
+library(BiocManager)
+```
+
+# Import data
+```{r data, include=FALSE}
+sample_metadata_tbl <- read_delim("1-sample data_220922_mr.csv", 
+    delim = ";", escape_double = FALSE, col_types = cols(SampleID = col_character()), trim_ws = TRUE)
+
+table_decontam_tbl <- read_delim("/Users/rebecca/Documents/Forschung/SFB_B07_Nephroprotection/2-otu_table_220922_gk.csv", delim = NULL, col_names = TRUE, col_types = NULL) 
+
+taxonomy_decontam_tbl <- read_delim("/Users/rebecca/Documents/Forschung/SFB_B07_Nephroprotection/3-tax_table_220922_gk.csv", delim = NULL, col_names = TRUE, col_types = NULL)
+```
+
+### Data cleaning
+```{r sample_metadata_clean_tbl} 
+sample_metadata_tbl_c <- sample_metadata_tbl %>% clean_names()
+glimpse(sample_metadata_tbl_c)
+```
+
+# Create Phyloseq Object
+```{r packages, include=FALSE}
+install.packages("phyloseq")
+pacman::p_load(phyloseq, microbiome, textshape, Biostrings)
+```
+
+```{r phyloseq}
+# tax_table
+tax_clean_df <- as.data.frame(taxonomy_decontam_tbl)
+rownames(tax_clean_df) <- tax_clean_df$...1
+tax_clean_df$...1 <- NULL
+tax_matrix <- as.matrix(tax_clean_df)
+
+# otu_table
+table_decontam_df <- as.data.frame(t(table_decontam_tbl))
+#rownames(table_decontam_df) <- table_decontam_df$...1
+colnames(table_decontam_df) <- table_decontam_df[1,]
+table_decontam_df <- table_decontam_df[-1, ] 
+table_decontam_df <- table_decontam_df %>% mutate_if(is.character, as.numeric)
+
+#table_decontam_df$...1 <- NULL
+
+
+
+#table_decontam_df <- table_decontam_df[order(row.names(table_decontam_df)), ]
+
+# sample_metadata
+#sample_metadata_df <- sample_metadata_tbl_c[sample_metadata_tbl_c$sample_id%in%rownames(table_decontam_df), ]
+sample_metadata_df <- as.data.frame(sample_metadata_tbl_c)
+rownames(sample_metadata_df) <- sample_metadata_df$sample_id
+#sample_metadata_df <- sample_metadata_df[order(row.names(sample_metadata_df)), ]
+
+#check if rownames for sample_metadata_df and table_decontam_df are same!
+x <- rownames(sample_metadata_df)
+y <- rownames(table_decontam_df)
+identical(x, y)
+z <- (x==y)
+summary(z)
+rownames_df <- data.frame(x, y, z)
+
+#tree
+
+# phyloseq
+otu <- otu_table(table_decontam_df, taxa_are_rows = FALSE)
+samp <- sample_data(sample_metadata_df)
+tax <- tax_table(tax_matrix)
+
+ps <- phyloseq(otu, samp, tax) 
+
+#dna <- Biostrings::DNAStringSet(taxa_names(ps))
+#names(dna) <- taxa_names(ps)
+#ps <- merge_phyloseq(ps, dna)
+#taxa_names(ps) <- paste0("ASV", seq(ntaxa(ps)))
+
+#calculate total reads
+sample_data(ps)$total_reads <- rowSums(otu_table(ps)) # adds library_size to metadata
+```
+
+```{r ps quality control}
+ggplot(sample_data(ps), aes(strain, total_reads, fill= strain))+
+  geom_boxplot(outlier.shape = NA)+
+   geom_jitter(size=0.3)+
+  #scale_y_log10()+
+  theme_bw()+
+  ggtitle("Library size")+
+  theme(axis.text.x = element_blank())+
+  geom_hline(yintercept = 5000)+
+  geom_hline(yintercept = 2500)
+
+ps_clean <- subset_samples(ps, total_reads >= 5000) 
+
+```
+
+```{r save rds}
+saveRDS(ps_clean, "/Users/rebecca/Documents/Forschung/SFB_B07_Nephroprotection/ps_clean.rds")
+```
+
