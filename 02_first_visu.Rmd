@@ -1,0 +1,126 @@
+---
+title: "Alpha and beta diversity"
+author: "Rebecca L. Knoll"
+date: "last edit `r format(Sys.time(), '%d %B %Y')`"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    code_folding: show
+    number_sections: yes
+    smart: no
+    toc: yes
+    df_print: paged
+    toc_float: yes
+---
+
+```{r setup 2, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache= FALSE)
+```
+
+```{r run import script, include=FALSE}
+# load libraries and phyloseq object
+pacman::p_load(tidyverse, phyloseq, magrittr, janitor, microbiome, knitr, lubridate, naniar, readxl, ggplot2, ggpubr,R.filesets)
+
+ps_clean <- loadRDS("/Users/rebecca/Documents/Forschung/SFB_B07_Nephroprotection/ps_clean.rds")
+```
+
+# Taxonomic composition
+```{r first visualization, warning=FALSE}
+#relative abundance barplot Phylum level
+
+ps_clean_relab <- transform_sample_counts(ps_clean, function(x) x/sum(x))
+
+bp_ps_relab <- plot_bar(ps_clean_relab, "sample_id", fill="Phylum")
+
+bp_ps_relab+
+  geom_bar(aes(color=Phylum, fill=Phylum), stat="identity", position="stack")+
+    theme(legend.key.height= unit(3, 'mm'),
+        legend.key.width= unit(3, 'mm'),legend.text = element_text(size=8), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank())+
+  scale_x_discrete(name="sample_id")+
+  scale_y_continuous(name="Relative abundance")+
+  facet_grid(cols = vars(strain), scales ="free_x", space ="free_x")
+
+ps_relab_1 <- prune_taxa(taxa_sums(ps_clean_relab) > 0.01, ps_clean_relab) # filter for taxa > 1%
+
+bp_ps_relab_fam <- plot_bar(ps_relab_1, "sample_id", fill="Family")
+
+bp_ps_relab_fam+
+  geom_bar(aes(color=Family, fill=Family), stat="identity", position="stack")+
+    theme(legend.key.height= unit(3, 'mm'),
+        legend.key.width= unit(3, 'mm'),legend.text = element_text(size=8), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank())+
+  scale_x_discrete(name="sample_id")+
+  scale_y_continuous(name="Relative abundance of family > 1%")+
+  facet_grid(cols = vars(strain), scales ="free_x", space ="free_x")
+```
+
+# Beta diversity - Ordination plots
+```{r Multidimensional scaling, warning=FALSE }
+#Multidimensional scaling
+
+PCA<- plot_ordination(ps_clean_relab, ordinate(ps_clean, "MDS"), color = "strain")
+
+PCA+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by strain")+
+  stat_ellipse()
+
+PCA_all <- plot_ordination(ps_clean_relab, ordinate(ps_clean, "MDS"), color = "strain", shape = "origin")
+PCA_all+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by strain")+
+  scale_shape_discrete(name="Origin")+
+  stat_ellipse()
+```
+
+# Alpha diversity
+```{r alpha diversity, warning=FALSE}
+
+summary(as_factor(sample_data(ps_clean)$strain))
+
+my_comparisons <- list( c("Nlrp3", "C57BL/6NCrl"), c("Casp11", "IL1a"), c("C57BL/6NRj", "C57BL6NRj"), c("Nlrp3", "Casp11"), c("Nlrp3", "IL1a"), c("Nlrp3", "C57BL/6NRj"), c("Nlrp3","C57BL6NRj"))
+
+alpha_bp <- plot_richness(ps_clean, x = "strain", measures = c("Observed", "Shannon", "Simpson"))
+
+alpha_bp+
+  geom_boxplot(aes(fill=strain)) +
+  geom_point(aes(fill=strain))+
+  theme_bw()+
+  ggtitle("Alpha diversity between strains")+
+  theme(text = element_text(size=15),axis.text.x= element_text(size=12, angle= 45, hjust = 1),legend.position = "right")
+
+alpha_bp+
+  geom_boxplot(aes(fill=strain)) +
+  geom_point(aes(fill=strain))+
+  theme_bw()+
+  ggtitle("Alpha diversity between strains")+
+  stat_compare_means(comparison=my_comparisons, method="wilcox.test", p.adjust.method="BH", label = "p.signif")+
+  theme(text = element_text(size=15),axis.text.x= element_text(size=12, angle= 45, hjust = 1),legend.position = "right")
+
+```
+
+## Alpha diversity statistics
+```{r statistics on alpha diversity sputum, warning=FALSE}
+
+# create alpha diversity dataframe
+alphadiversity_df<- estimate_richness(ps_clean, split = T, c("Observed", "Chao1", "Shannon", "Simpson"))
+
+#Richness
+kruskal.test(alphadiversity_df$Observed ~ sample_data(ps_clean)$strain)
+kruskal.test(alphadiversity_df$Chao1 ~ sample_data(ps_clean)$strain)
+
+#Shannon
+kruskal.test(alphadiversity_df$Shannon ~ sample_data(ps_clean)$strain)
+
+#pairwise.wilcox.test(alphadiversity_df_sputum$Shannon, sample_data(ps_sputum_5000)$visit,  p.adjust.method = "BH") #equals Mann-Whitney-U, but includes already all groups in the analysis and can adjust p-values(Mann-Whitney-U between 2 groups= wilcox.test)
+
+#Evenness
+kruskal.test(alphadiversity_df$Simpson ~ sample_data(ps_clean)$strain)
+
+#wilcox.test(alphadiversity_df$Simpson, as_factor(sample_data(ps_clean)$strain), p.adjust.method = "BH") #equals Mann-Whitney-U, but includes already all groups in the analysis and can adjust p-values(Mann-Whitney-U between 2 groups= wilcox.test)
+
+```
