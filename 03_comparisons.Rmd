@@ -1,0 +1,232 @@
+---
+title: "Comparison I: first analysis ("IL1a") cf. pedigree of the mice."
+author: "Rebecca L. Knoll"
+date: "last edit `r format(Sys.time(), '%d %B %Y')`"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    code_folding: show
+    number_sections: yes
+    smart: no
+    toc: yes
+    df_print: paged
+    toc_float: yes
+---
+
+```{r setup 2, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache= FALSE)
+```
+
+```{r run import script, include=FALSE}
+# load libraries and phyloseq object
+pacman::p_load(tidyverse, phyloseq, magrittr, janitor, microbiome, knitr, lubridate, naniar, readxl, ggplot2, ggpubr,R.filesets, metadeconfoundR)
+
+#renv::install('TillBirkner/MetadeconfoundR')
+
+ps_clean <- loadRDS("/Users/rebecca/Documents/Forschung/SFB_B07_Nephroprotection/ps_clean.rds")
+```
+
+# Comparison I: (B6NCrl vs original IL1a KO mice vs IL1a wild-type and knockout littermates)
+## Taxonomic composition
+```{r first visualization, warning=FALSE}
+#relative abundance barplot Phylum level
+
+ps_comparison_I <- subset_samples(ps_clean, comparison_i != is.na(comparison_i))
+
+ps_comparison_I_relab <- transform_sample_counts(ps_comparison_I, function(x) x/sum(x)*100)
+
+ps_clean_relab <- transform_sample_counts(ps_clean, function(x) x/sum(x)*100)
+
+bp_ps_relab <- plot_bar(ps_clean_relab, "sample_id", fill="Phylum")
+
+bp_ps_relab+
+  geom_bar(aes(color=Phylum, fill=Phylum), stat="identity", position="stack")+
+    theme(legend.key.height= unit(3, 'mm'),
+        legend.key.width= unit(3, 'mm'),legend.text = element_text(size=8), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank())+
+  scale_x_discrete(name="sample_id")+
+  scale_y_continuous(name="Relative abundance")+
+  facet_grid(cols = vars(comparison_i), scales ="free_x", space ="free_x")
+
+ps_relab_1 <- prune_taxa(taxa_sums(ps_clean_relab) > 0.01, ps_clean_relab) # filter for taxa > 1%
+
+bp_ps_relab_fam <- plot_bar(ps_relab_1, "sample_id", fill="Family")
+
+bp_ps_relab_fam+
+  geom_bar(aes(color=Family, fill=Family), stat="identity", position="stack")+
+    theme(legend.key.height= unit(3, 'mm'),
+        legend.key.width= unit(3, 'mm'),legend.text = element_text(size=8), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank())+
+  scale_x_discrete(name="sample_id")+
+  scale_y_continuous(name="Relative abundance of families > 1%")+
+  facet_grid(cols = vars(phenotype_i), scales ="free_x", space ="free_x")
+
+ci_ps_relab_fam <- plot_bar(ps_comparison_I_relab, "sample_id", fill="Family")
+
+facetlabels <- c("C57BL/6N - Crl - unprotected", "Il1a-ko - Erlangen - protected", "Il1a-ko/WT - FEM - unprotected")
+names(facetlabels) <- c("1", "2", "3")
+
+ci_ps_relab_fam+
+  geom_bar(aes(color=Family, fill=Family), stat="identity", position="stack")+
+    theme(legend.key.height= unit(3, 'mm'),
+        legend.key.width= unit(3, 'mm'),legend.text = element_text(size=8), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank())+
+  scale_x_discrete(name="sample_id")+
+  scale_y_continuous(name="Relative abundance of families (%)")+
+  facet_grid(cols = vars(comparison_i), scales ="free_x", space ="free_x",labeller=labeller(comparison_i = facetlabels))
+
+```
+## Beta diversity - Ordination plots
+```{r Multidimensional scaling, warning=FALSE }
+#Multidimensional scaling
+
+PCA<- plot_ordination(ps_comparison_I_relab, ordinate(ps_comparison_I_relab, "MDS"), color = "comparison_i")
+
+PCA+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by comparison")+
+  stat_ellipse()+
+  scale_color_discrete(labels = facetlabels)
+
+PCA<- plot_ordination(ps_comparison_I_relab, ordinate(ps_comparison_I_relab, "MDS"), color = "origin")
+
+PCA+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by origin")+
+  stat_ellipse()
+
+PCA<- plot_ordination(ps_comparison_I_relab, ordinate(ps_comparison_I_relab, "MDS"), color = "phenotype_i")
+
+PCA+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by phenotype")+
+  stat_ellipse()
+
+PCA_all <- plot_ordination(ps_comparison_I_relab, ordinate(ps_comparison_I_relab, "MDS"), color = "strain_gty", shape = "origin")
+PCA_all+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by strain_gty and origin")+
+  scale_shape_discrete(name="Origin")+
+  stat_ellipse()
+
+PCA_all <- plot_ordination(ps_comparison_I_relab, ordinate(ps_comparison_I_relab, "MDS"), color = "strain_gty_origin", shape = "origin")
+PCA_all+
+  geom_point(aes(shape = origin), size = 1)+
+  theme_bw()+
+  ggtitle("Variation by strain_gty and origin")+
+  scale_shape_discrete(name="Origin")+
+  stat_ellipse(aes(fill= "strain_gty_origin"))
+
+```
+## Alpha diversity
+```{r alpha diversity, warning=FALSE}
+
+my_comparisons_3 <- list( c("1", "2"), c("2", "3"), c("1", "3"))
+
+alpha_bp_3 <- plot_richness(ps_comparison_I, x = "comparison_i", measures = c("Observed", "Shannon", "Simpson"))
+
+alpha_bp_3+
+  geom_boxplot(aes(fill=comparison_i)) +
+  geom_point(aes(fill=comparison_i))+
+  theme_bw()+
+  ggtitle("Alpha diversity between 3 groups")+
+  theme(text = element_text(size=15),axis.text.x= element_text( size=12, angle= 45, hjust = 1), legend.position = "right")+
+  scale_fill_discrete(labels = facetlabels)+
+  stat_compare_means(comparison=my_comparisons_3, method="wilcox.test", p.adjust.method="BH", label = "p.adj")
+
+alpha_bp_4 <- plot_richness(ps_comparison_I, x = "strain_gty_origin", measures = c("Observed", "Shannon", "Simpson"))
+
+my_comparisons_4 <- list( c("C57BL/6NCrl_n/a_Crl","IL1a_ko_Erlangen"), c("IL1a_ko_FEM", "IL1a_wt_FEM" ), c("IL1a_ko_Erlangen", "IL1a_ko_FEM"), c("C57BL/6NCrl_n/a_Crl", "IL1a_ko_FEM"), c("C57BL/6NCrl_n/a_Crl", "IL1a_wt_FEM"), c("IL1a_ko_Erlangen","IL1a_wt_FEM"))
+
+alpha_bp_4+
+  geom_boxplot(aes(fill=strain_gty_origin)) +
+  geom_point(aes(fill=strain_gty_origin))+
+  theme_bw()+
+  ggtitle("Alpha diversity between 4 groups")+
+  stat_compare_means(comparison=my_comparisons_4, method="wilcox.test", p.adjust.method="BH", label = "p.signif")+
+  theme(text = element_text(size=15),axis.text.x= element_text(size=12, angle= 45, hjust = 1),legend.position = "right")
+```
+## PERMANOVA
+```{r}
+# PERMANOVA data preparation
+
+# calculate BC_distance
+BC_dist_comparison_i<- phyloseq::distance(ps_comparison_I_relab, method="bray", weighted=T)
+
+#extract metadata
+metadata_comparison_i <- as(sample_data(ps_comparison_I_relab),"data.frame")
+
+vegan::adonis2(BC_dist_comparison_i ~ strain_gty + phenotype_i,
+              permutations = 999, na.action=na.exclude, data = metadata_comparison_i, by="margin")
+
+vegan::adonis2(BC_dist_comparison_i ~ strain_gty + origin ,
+              permutations = 999, na.action=na.exclude, data = metadata_comparison_i, by="margin")
+```
+## MetadeconfoundR
+
+```{r MetadeconfoundR, eval=FALSE}
+
+# reduce columns to minimum
+metadata_comparison_i_r <- metadata_comparison_i%>%
+  select(c("treatment","phenotype_i", "origin", "strain_gty", "sex", "pcrea_mg_dl", "total_reads"))
+
+metadata_comparison_i_r<- metadata_comparison_i_r %>%
+  mutate(treatment=as.factor(treatment))%>%
+  #mutate(treatment=as.numeric(treatment))%>%
+  mutate(phenotype_i = as.factor(phenotype_i))%>%
+  mutate(origin=as.numeric(origin))%>%
+  mutate(strain_gty=as.factor(strain_gty))%>%
+  mutate(strain_gty=as.numeric(strain_gty))%>%
+  mutate(sex=as.numeric(sex))%>%
+  mutate(pcrea_mg_dl=as.numeric(pcrea_mg_dl))%>%
+  mutate(total_reads=as.numeric(total_reads))
+
+glimpse(metadata_comparison_i_r)
+
+view(metadata_comparison_i_r)
+
+metadata_comparison_i_r$treatment<- metadata_comparison_i_r$treatment-1
+metadata_comparison_i_r$phenotype_i<- metadata_comparison_i_r$phenotype_i-1
+
+metadata_comparison_i_r<-metadata_comparison_i_r%>%
+  mutate(origin_01 = case_when(origin==1~1, TRUE ~ 0))%>%
+  mutate(origin_02 = case_when(origin==2~1, TRUE ~ 0))%>%
+  mutate(origin_03 = case_when(origin==3~1, TRUE ~ 0))%>%
+  select(-origin)
+
+metadata_comparison_i_r<-metadata_comparison_i_r%>%
+  mutate(strain_gty_01 = case_when(strain_gty==1~1, TRUE ~ 0))%>%
+  mutate(strain_gty_02 = case_when(strain_gty==2~1, TRUE ~ 0))%>%
+  mutate(strain_gty_03 = case_when(strain_gty==3~1, TRUE ~ 0))%>%
+  mutate(strain_gty_04 = case_when(strain_gty==4~1, TRUE ~ 0))%>%
+  select(-strain_gty)
+
+
+features <- as.data.frame(otu_table(ps_comparison_I_relab))
+taxtable <- as.data.frame(tax_table(ps_comparison_I_relab))
+
+#create two-column-dataframe containing corresponding "human-readable" names to the "machine-readable" feature names used as row.names in metaDeconfOutput.  
+taxtable <- taxtable%>%
+  select(Genus)
+taxtable$ASV <- row.names(taxtable)
+taxtable<- cbind(ASV=taxtable$ASV,subset(taxtable,select = -c(ASV)))
+
+### will not run if the first column of the metadata has less than5 samples per group, that's why I needed to include treatment as an additional variable
+metad <- MetaDeconfound(featureMat = features, metaMat = metadata_comparison_i_r, nnodes=8)
+
+raw_p <- metad[1]
+corr_p <- metad[2]
+effect_size <- metad[3]
+status <- metad[4]
+
+hm <- BuildHeatmap(metad, featureNames = taxtable, showConfounded=TRUE)
+                                               
+hm+
+  theme(axis.text.x=element_text(size=15), axis.text.y=element_text(size=15, face="italic"))
+```
+
