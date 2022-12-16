@@ -1,0 +1,143 @@
+---
+title: 'Comparison III'
+author: "Rebecca L. Knoll"
+date: "last edit `r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    code_folding: show
+    number_sections: yes
+    smart: no
+    toc: yes
+    df_print: paged
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load packages and rds, include=FALSE}
+# load libraries and phyloseq object
+pacman::p_load(tidyverse, phyloseq, magrittr, janitor, microbiome, knitr, lubridate, naniar, readxl, ggplot2, ggpubr,R.filesets, metadeconfoundR,FactoMineR, factoextra)
+
+ps_clean <- loadRDS("/Users/rebecca/Documents/Forschung/SFB_B07_Nephroprotection/ps_clean.rds")
+```
+
+```{r filter data sets}
+ps_comparison_III <- subset_samples(ps_clean, comparison_iii != is.na(comparison_iii))
+
+ps_comparison_III_relab <- transform_sample_counts(ps_comparison_III, function(x) x/sum(x)*100)
+
+view(sample_data(ps_comparison_III))
+```
+
+# Comparison III: Experimentally tested animals (B6NCrl (group 7; n=6) vs Nlrp3 (n=3) and Casp11 (n=3)
+## Taxonomic composition
+```{r first visualization, warning=FALSE}
+#relative abundance barplot Phylum level
+
+facetlabels <- c("Nlpr3-wt-FEM", "Casp11-wt-FEM", "C57BL/6NCrl")
+names(facetlabels) <- c("8", "9", "7")
+
+bp_ps_relab <- plot_bar(ps_comparison_III_relab, "sample_id", fill="Phylum")
+
+bp_ps_relab+
+  geom_bar(aes(color=Phylum, fill=Phylum), stat="identity", position="stack")+
+    theme(legend.key.height= unit(3, 'mm'),
+        legend.key.width= unit(3, 'mm'),legend.text = element_text(size=8), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank())+
+  scale_x_discrete(name="sample_id")+
+  scale_y_continuous(name="Relative abundance")+
+  facet_grid(cols = vars(comparison_iii), scales ="free_x", space ="free_x",labeller=labeller(comparison_iii = facetlabels))
+
+ci_ps_relab_fam <- plot_bar(ps_comparison_III_relab, "sample_id", fill="Family")
+
+ci_ps_relab_fam+
+  geom_bar(aes(color=Family, fill=Family), stat="identity", position="stack")+
+    theme(legend.key.height= unit(3, 'mm'),
+        legend.key.width= unit(3, 'mm'),legend.text = element_text(size=8), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank())+
+  scale_x_discrete(name="sample_id")+
+  scale_y_continuous(name="Relative abundance of families (%)")+
+  facet_grid(cols = vars(comparison_iii), scales ="free_x", space ="free_x",labeller=labeller(comparison_iii = facetlabels))
+```
+
+## Beta diversity - Ordination plots
+```{r Multidimensional scaling, warning=FALSE }
+#Multidimensional scaling
+
+sample_data(ps_comparison_III_relab)$phenotype <- as.factor(sample_data(ps_comparison_III_relab)$phenotype)
+sample_data(ps_comparison_III)$phenotype <- as.factor(sample_data(ps_comparison_III)$phenotype)
+
+PCA<- plot_ordination(ps_comparison_III_relab, ordinate(ps_comparison_III_relab, "MDS"), color = "comparison_iii")
+
+PCA+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by comparison")+
+  stat_ellipse()+
+  scale_color_discrete(labels = facetlabels)
+
+PCA<- plot_ordination(ps_comparison_III_relab, ordinate(ps_comparison_III_relab, "MDS"), color = "phenotype")
+
+PCA+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by phenotype")+
+  stat_ellipse()
+
+
+sample_data(ps_comparison_III_relab)$pcrea_mg_dl <- as.numeric(sample_data(ps_comparison_III_relab)$pcrea_mg_dl)
+
+sample_data(ps_comparison_III)$pcrea_mg_dl <- as.numeric(sample_data(ps_comparison_III)$pcrea_mg_dl)
+
+PCA_all <- plot_ordination(ps_comparison_III_relab, ordinate(ps_comparison_III_relab, "MDS"), color = "pcrea_mg_dl", shape = "phenotype")
+
+PCA_all+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by crea and phenotype")+
+  scale_shape_discrete(name="phenotype")+
+  stat_ellipse()
+```
+
+
+## Alpha diversity
+```{r alpha diversity, warning=FALSE}
+
+my_comparisons_3 <- list( c("7", "8"), c("9", "8"), c("9", "7"))
+
+alpha_bp_3 <- plot_richness(ps_comparison_III, x = "comparison_iii", measures = c("Observed", "Shannon", "Simpson"))
+
+alpha_bp_3+
+  geom_boxplot(aes(fill=comparison_iii)) +
+  geom_point(aes(fill=comparison_iii))+
+  theme_bw()+
+  ggtitle("Alpha diversity between 3 groups")+
+  theme(text = element_text(size=15),axis.text.x= element_text( size=12, angle= 45, hjust = 1), legend.position = "right")+
+  scale_fill_discrete(labels = facetlabels)+
+  stat_compare_means(comparison=my_comparisons_3, method="wilcox.test", p.adjust.method="BH", label = "p.adj")
+
+alpha_bp_2 <- plot_richness(ps_comparison_III, x = "phenotype", measures = c("Observed", "Shannon", "Simpson"))
+
+my_comparisons_2 <- list(c("0","1"))
+
+alpha_bp_2+
+  geom_boxplot(aes(x=phenotype, fill=phenotype))+
+  geom_point(aes(fill=phenotype))+
+  theme_bw()+
+  ggtitle("Alpha diversity between phenotypes")+
+  stat_compare_means(comparison=my_comparisons_2, method="wilcox.test", p.adjust.method="BH", label = "p.signif")+
+  theme(text = element_text(size=15),axis.text.x= element_text(size=12, angle= 45, hjust = 1),legend.position = "right")
+
+scatter_2 <- plot_richness(ps_comparison_III, x = "pcrea_mg_dl", measures = c("Observed", "Shannon", "Simpson"))
+
+scatter_2+
+  geom_point(aes(color=pcrea_mg_dl))+
+  theme_bw()+
+  ggtitle("Alpha diversity plotted per crea")+
+  theme(text = element_text(size=15),axis.text.x= element_text(size=12, angle= 45, hjust = 1),legend.position = "right")+
+stat_smooth(method = "lm", formula = y ~ x, geom = "smooth")
+```

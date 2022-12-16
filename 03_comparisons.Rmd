@@ -1,10 +1,8 @@
 ---
-title: "Comparison I: first analysis ("IL1a") cf. pedigree of the mice."
+title: "Comparison I: first analysis IL1a pedigree of mice."
 author: "Rebecca L. Knoll"
 date: "last edit `r format(Sys.time(), '%d %B %Y')`"
 output:
-  pdf_document:
-    toc: yes
   html_document:
     code_folding: show
     number_sections: yes
@@ -12,6 +10,8 @@ output:
     toc: yes
     df_print: paged
     toc_float: yes
+  pdf_document:
+    toc: yes
 ---
 
 ```{r setup 2, include=FALSE}
@@ -21,8 +21,6 @@ knitr::opts_chunk$set(echo = TRUE, cache= FALSE)
 ```{r run import script, include=FALSE}
 # load libraries and phyloseq object
 pacman::p_load(tidyverse, phyloseq, magrittr, janitor, microbiome, knitr, lubridate, naniar, readxl, ggplot2, ggpubr,R.filesets, metadeconfoundR)
-
-#renv::install('TillBirkner/MetadeconfoundR')
 
 ps_clean <- loadRDS("/Users/rebecca/Documents/Forschung/SFB_B07_Nephroprotection/ps_clean.rds")
 ```
@@ -77,6 +75,7 @@ ci_ps_relab_fam+
   facet_grid(cols = vars(comparison_i), scales ="free_x", space ="free_x",labeller=labeller(comparison_i = facetlabels))
 
 ```
+
 ## Beta diversity - Ordination plots
 ```{r Multidimensional scaling, warning=FALSE }
 #Multidimensional scaling
@@ -123,6 +122,7 @@ PCA_all+
   stat_ellipse(aes(fill= "strain_gty_origin"))
 
 ```
+
 ## Alpha diversity
 ```{r alpha diversity, warning=FALSE}
 
@@ -150,9 +150,22 @@ alpha_bp_4+
   ggtitle("Alpha diversity between 4 groups")+
   stat_compare_means(comparison=my_comparisons_4, method="wilcox.test", p.adjust.method="BH", label = "p.signif")+
   theme(text = element_text(size=15),axis.text.x= element_text(size=12, angle= 45, hjust = 1),legend.position = "right")
+
+alpha_bp_2 <- plot_richness(ps_comparison_I, x = "phenotype_i", measures = c("Observed", "Shannon", "Simpson"))
+
+my_comparisons_2 <- list(c("0","1"))
+
+alpha_bp_2+
+  geom_boxplot(aes(fill=phenotype_i)) +
+  geom_point(aes(fill=phenotype_i))+
+  theme_bw()+
+  ggtitle("Alpha diversity between phenotypes")+
+  stat_compare_means(comparison=my_comparisons_2, method="wilcox.test", p.adjust.method="BH", label = "p.signif")+
+  theme(text = element_text(size=15),axis.text.x= element_text(size=12, angle= 45, hjust = 1),legend.position = "right")
 ```
+
 ## PERMANOVA
-```{r}
+```{r permanova}
 # PERMANOVA data preparation
 
 # calculate BC_distance
@@ -167,17 +180,15 @@ vegan::adonis2(BC_dist_comparison_i ~ strain_gty + phenotype_i,
 vegan::adonis2(BC_dist_comparison_i ~ strain_gty + origin ,
               permutations = 999, na.action=na.exclude, data = metadata_comparison_i, by="margin")
 ```
-## MetadeconfoundR
 
-```{r MetadeconfoundR, eval=FALSE}
+## MetadeconfoundR
+```{r MetadeconfoundR, fig.height=12, eval=FALSE}
 
 # reduce columns to minimum
 metadata_comparison_i_r <- metadata_comparison_i%>%
-  select(c("treatment","phenotype_i", "origin", "strain_gty", "sex", "pcrea_mg_dl", "total_reads"))
+  select(c("phenotype_i", "origin", "strain_gty", "sex", "pcrea_mg_dl", "total_reads"))
 
 metadata_comparison_i_r<- metadata_comparison_i_r %>%
-  mutate(treatment=as.factor(treatment))%>%
-  #mutate(treatment=as.numeric(treatment))%>%
   mutate(phenotype_i = as.factor(phenotype_i))%>%
   mutate(origin=as.numeric(origin))%>%
   mutate(strain_gty=as.factor(strain_gty))%>%
@@ -190,7 +201,6 @@ glimpse(metadata_comparison_i_r)
 
 view(metadata_comparison_i_r)
 
-metadata_comparison_i_r$treatment<- metadata_comparison_i_r$treatment-1
 metadata_comparison_i_r$phenotype_i<- metadata_comparison_i_r$phenotype_i-1
 
 metadata_comparison_i_r<-metadata_comparison_i_r%>%
@@ -206,6 +216,7 @@ metadata_comparison_i_r<-metadata_comparison_i_r%>%
   mutate(strain_gty_04 = case_when(strain_gty==4~1, TRUE ~ 0))%>%
   select(-strain_gty)
 
+metadata_comparison_i_r<- cbind(origin_03=metadata_comparison_i_r$origin_03,subset(metadata_comparison_i_r,select = -c(origin_03))) # brings origin03 into the first column
 
 features <- as.data.frame(otu_table(ps_comparison_I_relab))
 taxtable <- as.data.frame(tax_table(ps_comparison_I_relab))
@@ -216,7 +227,7 @@ taxtable <- taxtable%>%
 taxtable$ASV <- row.names(taxtable)
 taxtable<- cbind(ASV=taxtable$ASV,subset(taxtable,select = -c(ASV)))
 
-### will not run if the first column of the metadata has less than5 samples per group, that's why I needed to include treatment as an additional variable
+### will not run if the first column of the metadata has less than5 samples per group, that's why I needed to use origin 03 as  firstvariable
 metad <- MetaDeconfound(featureMat = features, metaMat = metadata_comparison_i_r, nnodes=8)
 
 raw_p <- metad[1]
@@ -230,3 +241,145 @@ hm+
   theme(axis.text.x=element_text(size=15), axis.text.y=element_text(size=15, face="italic"))
 ```
 
+## Compare Genera abundances between 3 groups
+```{r genera abundances}
+
+ps_comp_prev <- filter_taxa(ps_comparison_I, function(x){sum(x > 0) > 3}, prune = TRUE)
+#prevalence 17 %: this reduces the number of ASVs observed to 651 from 1650
+
+ps_comp_prev_relab <- transform_sample_counts(ps_comp_prev, function(x) x/sum(x)) # transforms to relative abundance
+
+ps_comp_prev_relab_25 <- prune_taxa(taxa_sums(ps_comp_prev_relab) > 0.025, ps_comp_prev_relab)
+# this reduces to OTUs > 0.1% abundances,  the number of OTUs is reduced to 471 from 651
+# this reduces to OTUs > 0.5% abundances,  the number of OTUs is reduced to 267 from 651
+# this reduces to OTUs > 1% abundances,  the number of OTUs is reduced to 202 from 651
+# this reduces to OTUs > 1.5% abundances,  the number of OTUs is reduced to 160 from 651
+# this reduces to OTUs > 2.5% abundances,  the number of OTUs is reduced to 117 from 651
+
+df_comp_prev_relab <- psmelt(ps_comp_prev_relab_25)
+
+# Statistics between groups
+
+stats_genus<- compare_means(Abundance~comparison_i, data= df_comp_prev_relab,  method = "wilcox.test", p.adjust.method="BH", group.by = "Genus")
+
+genus_results_sig <- stats_genus%>%
+  filter(p.adj<0.05)
+
+genus_results_sig_list <- c(genus_results_sig$Genus)
+```
+
+```{r boxplots sig generas}
+
+genus_sig_df <- df_comp_prev_relab[df_comp_prev_relab$Genus %in% c(genus_results_sig_list),]
+
+genus_sig_df%>%
+  ggplot(aes(x=comparison_i, y=Abundance*100, fill=comparison_i))+
+  geom_boxplot()+
+  geom_point(position=position_jitterdodge(), alpha = 0.5)+
+  facet_wrap("Genus", scales="free")+ #, ncol = 6
+  theme_bw()+
+  ggtitle("Differences in relative abundances of Genus >2.5%")+
+  #scale_fill_manual(values= c("#FD6F30FF", "#F9D23CFF","#EB1E2CFF"), name="Sample type",
+                         #breaks=c("A", "B","C"),
+                         #labels=c("Preterm infant - probiotic", "Preterm infant- placebo","Fullterm infant"))+
+  theme(axis.text.x = element_blank()) +
+  ylab("Relative abundance (%)")+
+  xlab("")+
+  theme(legend.key.height= unit(5, 'mm'),
+        legend.key.width= unit(5, 'mm'),legend.text = element_text(size=12), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank(), strip.text.x = element_text(
+        size = 8))#+
+#stat_compare_means(comparison=my_comparisons_tt, method="wilcox.test", p.adjust.method="BH", label = "p.signif", hide.ns=TRUE)
+```
+
+## Compare genera only between the 2 phenotypes, rel ab > 2.5%
+```{r boxplots sig genera phneotypes rel ab 2.5}
+ps_comp_prev <- filter_taxa(ps_comparison_I, function(x){sum(x > 0) > 3}, prune = TRUE)
+#prevalence 17 %: this reduces the number of ASVs observed to 651 from 1650
+
+ps_comp_prev_relab <- transform_sample_counts(ps_comp_prev, function(x) x/sum(x)) # transforms to relative abundance
+
+ps_comp_prev_relab_25 <- prune_taxa(taxa_sums(ps_comp_prev_relab) > 0.025, ps_comp_prev_relab)
+# this reduces to OTUs > 0.1% abundances,  the number of OTUs is reduced to 471 from 651
+# this reduces to OTUs > 0.5% abundances,  the number of OTUs is reduced to 267 from 651
+# this reduces to OTUs > 1% abundances,  the number of OTUs is reduced to 202 from 651
+# this reduces to OTUs > 1.5% abundances,  the number of OTUs is reduced to 160 from 651
+# this reduces to OTUs > 2.5% abundances,  the number of OTUs is reduced to 117 from 651
+
+df_comp_prev_relab <- psmelt(ps_comp_prev_relab_25)
+
+stats_genus<- compare_means(Abundance~phenotype_i, data= df_comp_prev_relab,  method = "wilcox.test", p.adjust.method="BH", group.by = "Genus")
+
+genus_results_sig <- stats_genus%>%
+  filter(p.adj<0.05)
+
+genus_results_sig_list <- c(genus_results_sig$Genus)
+
+genus_sig_df <- df_comp_prev_relab[df_comp_prev_relab$Genus %in% c(genus_results_sig_list),]
+
+genus_sig_df%>%
+  ggplot(aes(x=phenotype_i, y=Abundance*100, fill=phenotype_i))+
+  geom_boxplot()+
+  geom_point(position=position_jitterdodge(), alpha = 0.5)+
+  facet_wrap("Genus", scales="free")+ #, ncol = 6
+  theme_bw()+
+  ggtitle("Differences in relative abundances of Genera >2.5%")+
+  #scale_fill_manual(values= c("#FD6F30FF", "#F9D23CFF","#EB1E2CFF"), name="Sample type",
+                         #breaks=c("A", "B","C"),
+                         #labels=c("Preterm infant - probiotic", "Preterm infant- placebo","Fullterm infant"))+
+  theme(axis.text.x = element_blank()) +
+  ylab("Relative abundance (%)")+
+  xlab("")+
+  theme(legend.key.height= unit(5, 'mm'),
+        legend.key.width= unit(5, 'mm'),legend.text = element_text(size=12), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank(), strip.text.x = element_text(
+        size = 8))#+
+#stat_compare_means(comparison=my_comparisons_tt, method="wilcox.test", p.adjust.method="BH", label = "p.signif", hide.ns=TRUE)
+
+view(tax_table(ps_comparison_I))
+```
+
+## Compare genera only between the 2 phenotypes, rel ab >1%
+```{r boxplots sig genera phneotypes rel ab 1}
+ps_comp_prev <- filter_taxa(ps_comparison_I, function(x){sum(x > 0) > 3}, prune = TRUE)
+#prevalence 17 %: this reduces the number of ASVs observed to 651 from 1650
+
+ps_comp_prev_relab <- transform_sample_counts(ps_comp_prev, function(x) x/sum(x)) # transforms to relative abundance
+
+ps_comp_prev_relab_25 <- prune_taxa(taxa_sums(ps_comp_prev_relab) > 0.01, ps_comp_prev_relab)
+# this reduces to OTUs > 0.1% abundances,  the number of OTUs is reduced to 471 from 651
+# this reduces to OTUs > 0.5% abundances,  the number of OTUs is reduced to 267 from 651
+# this reduces to OTUs > 1% abundances,  the number of OTUs is reduced to 202 from 651
+# this reduces to OTUs > 1.5% abundances,  the number of OTUs is reduced to 160 from 651
+# this reduces to OTUs > 2.5% abundances,  the number of OTUs is reduced to 117 from 651
+
+df_comp_prev_relab <- psmelt(ps_comp_prev_relab_25)
+
+stats_genus<- compare_means(Abundance~phenotype_i, data= df_comp_prev_relab,  method = "wilcox.test", p.adjust.method="BH", group.by = "Genus")
+
+genus_results_sig <- stats_genus%>%
+  filter(p.adj<0.05)
+
+genus_results_sig_list <- c(genus_results_sig$Genus)
+
+genus_sig_df <- df_comp_prev_relab[df_comp_prev_relab$Genus %in% c(genus_results_sig_list),]
+
+genus_sig_df%>%
+  ggplot(aes(x=phenotype_i, y=Abundance*100, fill=phenotype_i))+
+  geom_boxplot()+
+  geom_point(position=position_jitterdodge(), alpha = 0.5)+
+  facet_wrap("Genus", scales="free")+ #, ncol = 6
+  theme_bw()+
+  ggtitle("Differences in relative abundances of Genus >1%")+
+  #scale_fill_manual(values= c("#FD6F30FF", "#F9D23CFF","#EB1E2CFF"), name="Sample type",
+                         #breaks=c("A", "B","C"),
+                         #labels=c("Preterm infant - probiotic", "Preterm infant- placebo","Fullterm infant"))+
+  theme(axis.text.x = element_blank()) +
+  ylab("Relative abundance (%)")+
+  xlab("")+
+  theme(legend.key.height= unit(5, 'mm'),
+        legend.key.width= unit(5, 'mm'),legend.text = element_text(size=12), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank(), strip.text.x = element_text(
+        size = 8))#+
+#stat_compare_means(comparison=my_comparisons_tt, method="wilcox.test", p.adjust.method="BH", label = "p.signif", hide.ns=TRUE)
+```

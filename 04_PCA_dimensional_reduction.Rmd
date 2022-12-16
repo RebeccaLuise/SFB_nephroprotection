@@ -1,0 +1,414 @@
+---
+title: "Dimensional reduction on PCA - to filter for taxa which mostly generate the distinction into 2 phenotype groups"
+author: "Rebecca L. Knoll"
+date: "last edit `r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    code_folding: show
+    number_sections: yes
+    smart: no
+    toc: yes
+    df_print: paged
+    toc_float: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load packages and rds, include=FALSE}
+# load libraries and phyloseq object
+pacman::p_load(tidyverse, phyloseq, magrittr, janitor, microbiome, knitr, lubridate, naniar, readxl, ggplot2, ggpubr,R.filesets, metadeconfoundR,FactoMineR, factoextra)
+
+ps_clean <- loadRDS("/Users/rebecca/Documents/Forschung/SFB_B07_Nephroprotection/ps_clean.rds")
+```
+
+
+```{r filter data sets}
+ps_comparison_I <- subset_samples(ps_clean, comparison_i != is.na(comparison_i))
+
+ps_comparison_I_relab <- transform_sample_counts(ps_comparison_I, function(x) x/sum(x)*100)
+```
+
+# Run dimensional reduction to find driving genera of discrimination between groups
+```{r run dimensional reduction}
+
+PCA<- plot_ordination(ps_comparison_I_relab, ordinate(ps_comparison_I_relab, "MDS"), color = "phenotype_i")
+
+PCA+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by phenotype")+
+  stat_ellipse()
+
+# prepare input
+features <- as.data.frame(otu_table(ps_comparison_I_relab))
+# have to remove zero variable
+features <- features[ , which(apply(features, 2, var) != 0)] # removes OTUs which have only 0s
+
+# extract OTUs
+taxtable <- as.data.frame(tax_table(ps_comparison_I_relab))
+
+#extract metadata
+metadata_comparison_i <- as(sample_data(ps_comparison_I_relab),"data.frame")
+
+# Dimension reduction using PCA
+res.pca <- prcomp(features,  scale = TRUE) # Performs a principal components analysis on the given data matrix and returns the results as an object of class prcomp.
+
+# Coordinates of individuals
+# remove hetero from matrix
+ind.coord.2 <- as.data.frame(get_pca_ind(res.pca)$coord)
+ind.coord <- merge(ind.coord.2, metadata_comparison_i, by = 0)
+row.names(ind.coord) <- ind.coord$Row.names
+ind.coord$Row.names <- NULL
+# Percentage of variance explained by dimensions
+eigenvalue <- round(get_eigenvalue(res.pca), 1)
+variance.percent <- eigenvalue$variance.percent
+head(eigenvalue)
+
+#Dim1
+PCA_contrib.1 <- res.pca %>%
+  broom::tidy(matrix = "variables") %>%
+  dplyr::filter(PC == "1") %>%
+  slice_max(n=20, order_by = abs(value))
+
+PCA_contrib.1$column
+
+PCA_contrib.1 %>%
+  mutate(column=fct_reorder(column, value)) %>%
+  ggplot(aes(x=value, y=column)) +
+  geom_segment(aes(x=value, xend=0, y=column, yend=column), color="black") +
+  geom_point(aes(size=3, color=value)) +
+  scale_color_gradient2 (low = "#0C4C00", high = "#65014B", mid = "white", midpoint = 0) +
+  theme_bw() +
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, linetype = 2, color="grey40") +
+  scale_x_continuous(labels = scales::percent, limits = c(-0.30, 0.30), breaks = seq(-0.3,0.30, by = 0.10)) +
+  xlab("Contribution to PC1") +
+  ylab("") -> p1.con
+
+p1.con
+
+#Dim2
+PCA_contrib.2 <- res.pca %>%
+  broom::tidy(matrix = "variables") %>%
+  dplyr::filter(PC == "2") %>%
+  slice_max(n=20, order_by = abs(value))
+
+PCA_contrib.2$column
+
+PCA_contrib.2 %>%
+  mutate(column=fct_reorder(column, value)) %>%
+  ggplot(aes(x=value, y=column)) +
+  geom_segment(aes(x=value, xend=0, y=column, yend=column), color="black") +
+  geom_point(aes(size=3, color=value)) +
+  scale_color_gradient2 (low = "#0C4C00", high = "#65014B", mid = "white", midpoint = 0) +
+  theme_bw() +
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, linetype = 2, color="grey40") +
+  scale_x_continuous(labels = scales::percent, limits = c(-0.30, 0.30), breaks = seq(-0.3,0.30, by = 0.10)) +
+  xlab("Contribution to PC2") +
+  ylab("") -> p2.con
+
+p2.con
+```
+```{r plot genera found in dimensional reduction and run statistics, warning=FALSE, fig.height=15, fig.width=15}
+
+PCA_contrib_1and2dimension <- c(PCA_contrib.1$column,PCA_contrib.2$column)%>%
+  unique()
+
+df_comp_relab <- psmelt(ps_comparison_I_relab)
+
+PCA_contrib_1and2_df <- df_comp_relab[df_comp_relab$OTU %in% c(PCA_contrib_1and2dimension),]
+
+PCA_contrib_1and2_df <- PCA_contrib_1and2_df%>%
+  mutate(OTU_genus = paste(OTU, Genus))
+
+my_comparisons_pt <- list(c("0","1"))
+
+PCA_contrib_1and2_df %>%
+  ggplot(aes(x=phenotype_i, y=Abundance, fill=phenotype_i))+
+  geom_boxplot()+
+  geom_point(alpha = 0.5)+
+  facet_wrap("OTU_genus", scales="free", ncol = 5)+
+  theme_bw()+
+  ggtitle("40 top OTUs of PCA")+
+  theme(axis.text.x = element_blank()) +
+  ylab("Relative abundance (%)")+
+  xlab("")+
+  theme(legend.key.height= unit(5, 'mm'),
+        legend.key.width= unit(5, 'mm'),legend.text = element_text(size=12), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank(), strip.text.x = element_text(
+        size = 8))+
+stat_compare_means(comparison=my_comparisons_pt, method="wilcox.test", p.adjust.method="BH", label = "p.signif", hide.ns=TRUE)
+
+```
+
+# Run dimensional reduction in a reduced data set to find driving genera of discrimination between groups
+```{r run dimensional reduction in reduced data set}
+
+# reduce data set to taxa observed in at least in 4 animals
+ps_comp_prev <- filter_taxa(ps_comparison_I_relab, function(x){sum(x > 0) > 3}, prune = TRUE)
+#prevalence 17 %: this reduces the number of ASVs observed to 651 from 1650
+
+ps_comp_prev <- prune_taxa(taxa_sums(ps_comp_prev ) > 0.025, ps_comp_prev )
+
+PCA<- plot_ordination(ps_comp_prev, ordinate(ps_comp_prev, "MDS"), color = "phenotype_i")
+
+PCA+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by phenotype")+
+  stat_ellipse()
+
+# prepare input
+features <- as.data.frame(otu_table(ps_comp_prev))
+# have to remove zero variable
+features <- features[ , which(apply(features, 2, var) != 0)] # removes OTUs which have only 0s
+
+# extract OTUs
+taxtable <- as.data.frame(tax_table(ps_comp_prev))
+
+#extract metadata
+metadata_comparison_i <- as(sample_data(ps_comp_prev),"data.frame")
+
+# Dimension reduction using PCA
+res.pca <- prcomp(features,  scale = TRUE) # Performs a principal components analysis on the given data matrix and returns the results as an object of class prcomp.
+
+# Coordinates of individuals
+# remove hetero from matrix
+ind.coord.2 <- as.data.frame(get_pca_ind(res.pca)$coord)
+ind.coord <- merge(ind.coord.2, metadata_comparison_i, by = 0)
+row.names(ind.coord) <- ind.coord$Row.names
+ind.coord$Row.names <- NULL
+# Percentage of variance explained by dimensions
+eigenvalue <- round(get_eigenvalue(res.pca), 1)
+variance.percent <- eigenvalue$variance.percent
+head(eigenvalue)
+
+#Dim1
+PCA_contrib.1 <- res.pca %>%
+  broom::tidy(matrix = "variables") %>%
+  dplyr::filter(PC == "1") %>%
+  slice_max(n=20, order_by = abs(value))
+
+PCA_contrib.1$column
+
+PCA_contrib.1 %>%
+  mutate(column=fct_reorder(column, value)) %>%
+  ggplot(aes(x=value, y=column)) +
+  geom_segment(aes(x=value, xend=0, y=column, yend=column), color="black") +
+  geom_point(aes(size=3, color=value)) +
+  scale_color_gradient2 (low = "#0C4C00", high = "#65014B", mid = "white", midpoint = 0) +
+  theme_bw() +
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, linetype = 2, color="grey40") +
+  scale_x_continuous(labels = scales::percent, limits = c(-0.30, 0.30), breaks = seq(-0.3,0.30, by = 0.10)) +
+  xlab("Contribution to PC1") +
+  ylab("") -> p1.con
+
+p1.con
+
+#Dim2
+PCA_contrib.2 <- res.pca %>%
+  broom::tidy(matrix = "variables") %>%
+  dplyr::filter(PC == "2") %>%
+  slice_max(n=20, order_by = abs(value))
+
+PCA_contrib.2$column
+
+PCA_contrib.2 %>%
+  mutate(column=fct_reorder(column, value)) %>%
+  ggplot(aes(x=value, y=column)) +
+  geom_segment(aes(x=value, xend=0, y=column, yend=column), color="black") +
+  geom_point(aes(size=3, color=value)) +
+  scale_color_gradient2 (low = "#0C4C00", high = "#65014B", mid = "white", midpoint = 0) +
+  theme_bw() +
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, linetype = 2, color="grey40") +
+  scale_x_continuous(labels = scales::percent, limits = c(-0.30, 0.30), breaks = seq(-0.3,0.30, by = 0.10)) +
+  xlab("Contribution to PC2") +
+  ylab("") -> p2.con
+
+p2.con
+```
+
+```{r plot genera found in dimensional reduction in the reduced data set and run statistics, fig.height=15, fig.width=15}
+
+PCA_contrib_1and2dimension <- c(PCA_contrib.1$column,PCA_contrib.2$column)%>%
+  unique()
+
+df_comp_relab <- psmelt(ps_comparison_I_relab)
+
+PCA_contrib_1and2_df <- df_comp_relab[df_comp_relab$OTU %in% c(PCA_contrib_1and2dimension),]
+
+PCA_contrib_1and2_df <- PCA_contrib_1and2_df%>%
+  mutate(OTU_genus = paste(OTU, Genus))
+
+my_comparisons_pt <- list(c("0","1"))
+
+PCA_contrib_1and2_df %>%
+  ggplot(aes(x=phenotype_i, y=Abundance, fill=phenotype_i))+
+  geom_boxplot()+
+  geom_point(alpha = 0.5)+
+  facet_wrap("OTU_genus", scales="free", ncol = 5)+
+  theme_bw()+
+  ggtitle("40 top OTUs of PCA")+
+  #scale_fill_manual(values= c("#FD6F30FF", "#F9D23CFF","#EB1E2CFF"), name="Sample type",
+                         #breaks=c("A", "B","C"),
+                         #labels=c("Preterm infant - probiotic", "Preterm infant- placebo","Fullterm infant"))+
+  theme(axis.text.x = element_blank()) +
+  ylab("Relative abundance (%)")+
+  xlab("")+
+  theme(legend.key.height= unit(5, 'mm'),
+        legend.key.width= unit(5, 'mm'),legend.text = element_text(size=12), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank(), strip.text.x = element_text(
+        size = 8))+
+stat_compare_means(comparison=my_comparisons_pt, method="wilcox.test", p.adjust.method="BH", label = "p.signif", hide.ns=TRUE)
+
+PCA_contrib_1and2_df %>%
+  ggplot(aes(x=phenotype_i, y=Abundance, fill=phenotype_i))+
+  geom_boxplot()+
+  geom_point(alpha = 0.5)+
+  facet_wrap("Genus", scales="free")+ #, ncol = 6
+  theme_bw()+
+  ggtitle("40 top OTUs of PCA assigned to genera")+
+  #scale_fill_manual(values= c("#FD6F30FF", "#F9D23CFF","#EB1E2CFF"), name="Sample type",
+                         #breaks=c("A", "B","C"),
+                         #labels=c("Preterm infant - probiotic", "Preterm infant- placebo","Fullterm infant"))+
+  theme(axis.text.x = element_blank()) +
+  ylab("Relative abundance (%)")+
+  xlab("")+
+  theme(legend.key.height= unit(5, 'mm'),
+        legend.key.width= unit(5, 'mm'),legend.text = element_text(size=12), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank(), strip.text.x = element_text(
+        size = 8))+
+stat_compare_means(comparison=my_comparisons_pt, method="wilcox.test", p.adjust.method="BH", label = "p.signif", hide.ns=TRUE)
+
+```
+
+
+# Family level: Run dimensional reduction in a reduced data set to find driving families of discrimination between groups
+```{r family run dimensional reduction in reduced data set}
+
+# reduce data set to taxa observed in at least in 4 animals
+ps_comp_prev <- filter_taxa(ps_comparison_I_relab, function(x){sum(x > 0) > 3}, prune = TRUE)
+#prevalence 17 %: this reduces the number of ASVs observed to 651 from 1650
+
+ps_comp_prev <- prune_taxa(taxa_sums(ps_comp_prev ) > 0.025, ps_comp_prev )
+
+PCA<- plot_ordination(ps_comp_prev, ordinate(ps_comp_prev, "MDS"), color = "phenotype_i")
+
+PCA+
+  geom_point(size = 1)+
+  theme_bw()+
+  ggtitle("Variation by phenotype")+
+  stat_ellipse()
+
+# prepare input
+features <- as.data.frame(otu_table(ps_comp_prev))
+# have to remove zero variable
+features <- features[ , which(apply(features, 2, var) != 0)] # removes OTUs which have only 0s
+
+# extract OTUs
+taxtable <- as.data.frame(tax_table(ps_comp_prev))
+
+#extract metadata
+metadata_comparison_i <- as(sample_data(ps_comp_prev),"data.frame")
+
+# Dimension reduction using PCA
+res.pca <- prcomp(features,  scale = TRUE) # Performs a principal components analysis on the given data matrix and returns the results as an object of class prcomp.
+
+# Coordinates of individuals
+# remove hetero from matrix
+ind.coord.2 <- as.data.frame(get_pca_ind(res.pca)$coord)
+ind.coord <- merge(ind.coord.2, metadata_comparison_i, by = 0)
+row.names(ind.coord) <- ind.coord$Row.names
+ind.coord$Row.names <- NULL
+# Percentage of variance explained by dimensions
+eigenvalue <- round(get_eigenvalue(res.pca), 1)
+variance.percent <- eigenvalue$variance.percent
+head(eigenvalue)
+
+#Dim1
+PCA_contrib.1 <- res.pca %>%
+  broom::tidy(matrix = "variables") %>%
+  dplyr::filter(PC == "1") %>%
+  slice_max(n=50, order_by = abs(value))
+
+PCA_contrib.1$column
+
+PCA_contrib.1 %>%
+  mutate(column=fct_reorder(column, value)) %>%
+  ggplot(aes(x=value, y=column)) +
+  geom_segment(aes(x=value, xend=0, y=column, yend=column), color="black") +
+  geom_point(aes(size=3, color=value)) +
+  scale_color_gradient2 (low = "#0C4C00", high = "#65014B", mid = "white", midpoint = 0) +
+  theme_bw() +
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, linetype = 2, color="grey40") +
+  scale_x_continuous(labels = scales::percent, limits = c(-0.30, 0.30), breaks = seq(-0.3,0.30, by = 0.10)) +
+  xlab("Contribution to PC1") +
+  ylab("") -> p1.con
+
+p1.con
+
+#Dim2
+PCA_contrib.2 <- res.pca %>%
+  broom::tidy(matrix = "variables") %>%
+  dplyr::filter(PC == "2") %>%
+  slice_max(n=50, order_by = abs(value))
+
+PCA_contrib.2$column
+
+PCA_contrib.2 %>%
+  mutate(column=fct_reorder(column, value)) %>%
+  ggplot(aes(x=value, y=column)) +
+  geom_segment(aes(x=value, xend=0, y=column, yend=column), color="black") +
+  geom_point(aes(size=3, color=value)) +
+  scale_color_gradient2 (low = "#0C4C00", high = "#65014B", mid = "white", midpoint = 0) +
+  theme_bw() +
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, linetype = 2, color="grey40") +
+  scale_x_continuous(labels = scales::percent, limits = c(-0.30, 0.30), breaks = seq(-0.3,0.30, by = 0.10)) +
+  xlab("Contribution to PC2") +
+  ylab("") -> p2.con
+
+p2.con
+```
+
+```{r family plot genera found in dimensional reduction in the reduced data set and run statistics, fig.height=15, fig.width=15, warning=FALSE}
+
+PCA_contrib_1and2dimension <- c(PCA_contrib.1$column,PCA_contrib.2$column)%>%
+  unique()
+
+df_comp_relab <- psmelt(ps_comparison_I_relab)
+
+PCA_contrib_1and2_df <- df_comp_relab[df_comp_relab$OTU %in% c(PCA_contrib_1and2dimension),]
+
+PCA_contrib_1and2_df <- PCA_contrib_1and2_df%>%
+  mutate(OTU_genus = paste(OTU, Genus))
+
+my_comparisons_pt <- list(c("0","1"))
+
+PCA_contrib_1and2_df %>%
+  ggplot(aes(x=phenotype_i, y=Abundance, fill=phenotype_i))+
+  geom_boxplot()+
+  geom_point(alpha = 0.5)+
+  facet_wrap("Family", scales="free", ncol = 5)+
+  theme_bw()+
+  ggtitle("100 top OTUs of PCA on family level")+
+  #scale_fill_manual(values= c("#FD6F30FF", "#F9D23CFF","#EB1E2CFF"), name="Sample type",
+                         #breaks=c("A", "B","C"),
+                         #labels=c("Preterm infant - probiotic", "Preterm infant- placebo","Fullterm infant"))+
+  theme(axis.text.x = element_blank()) +
+  ylab("Relative abundance (%)")+
+  xlab("")+
+  theme(legend.key.height= unit(5, 'mm'),
+        legend.key.width= unit(5, 'mm'),legend.text = element_text(size=12), legend.position = "bottom", 
+        axis.ticks = element_blank(), axis.text.x = element_blank(), strip.text.x = element_text(
+        size = 8))+
+stat_compare_means(comparison=my_comparisons_pt, method="wilcox.test", p.adjust.method="BH", label = "p.signif", hide.ns=TRUE)
+```
